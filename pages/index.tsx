@@ -79,6 +79,13 @@ function Index({
     submitButtons.forEach((button: HTMLButtonElement) => {
       button.addEventListener("click", async function (e) {
         e.preventDefault();
+        // preventDefault() cancels the native submission, which is the only
+        // point the browser runs constraint validation — so re-run it here or
+        // required checkboxes/selects are silently skipped.
+        const form = button.closest("form");
+        if (form && !form.reportValidity()) {
+          return;
+        }
         if (emailInput) {
           emailInput.reportValidity();
           if (emailInput.value) {
