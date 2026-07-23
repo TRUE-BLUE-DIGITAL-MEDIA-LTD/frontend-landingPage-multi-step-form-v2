@@ -159,7 +159,6 @@ model Domain {
 
   name              String  @unique
   googleAnalyticsId String?
-  oxyeyeAnalyticsId String?
 
   note String
 
@@ -481,4 +480,50 @@ model SmsPool {
 
   userId String @db.ObjectId
   user   User   @relation(fields: [userId], references: [id])
+}
+
+model LanderSession {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+
+  sessionId String @unique
+
+  landingPageId String  @db.ObjectId
+  domainId      String? @db.ObjectId
+
+  country     String?
+  device      LanderDevice @default(desktop)
+  referrer    String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  visitorId   String?
+  isReturning Boolean @default(false)
+
+  clickedMain  Boolean        @default(false)
+  clickedAt    DateTime?
+  clickTarget  String?
+  exitType     LanderExitType @default(unknown)
+  timeOnPageMs Int?
+  maxScrollPct Int?
+
+  steps Json?
+
+  @@index([landingPageId, createAt])
+  @@index([createAt])
+  @@index([domainId, createAt])
+  @@map(name: "landerSessions")
+}
+
+enum LanderDevice {
+  desktop
+  mobile
+}
+
+enum LanderExitType {
+  clicked_through
+  back
+  closed
+  unknown
 }
