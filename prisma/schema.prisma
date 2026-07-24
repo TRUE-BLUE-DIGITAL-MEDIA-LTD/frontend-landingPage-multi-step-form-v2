@@ -414,6 +414,7 @@ model Customer {
   website      String?
   zip_code     String?
   ip          String?
+  country     String?
   formAnswers Json?
 
   landingPageId String      @db.ObjectId

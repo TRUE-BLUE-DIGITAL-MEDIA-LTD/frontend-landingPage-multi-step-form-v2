@@ -17,6 +17,7 @@ import Swal from "sweetalert2";
 import { Language } from "../interfaces";
 import { initLanderTracking, LanderTracker } from "@/services/tracking";
 import { isMainTarget } from "@/services/main-target";
+import { countryFromIp } from "../server/geo";
 
 function Index({
   landingPage,
@@ -438,17 +439,9 @@ const prisma = new PrismaClient();
 export default Index;
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
   let host = ctx.req.headers.host;
-  let country = "United States";
-  try {
-    const userIP = requestIp.getClientIp(ctx.req);
-    const countryResponse = await fetch(`http://ip-api.com/json/${userIP}`);
-    const response = await countryResponse?.json();
-    if (response?.country) {
-      country = response?.country;
-    }
-  } catch (error) {
-    console.log("error", error);
-  }
+  // Analytics keeps its historical default when the lookup fails.
+  const country =
+    (await countryFromIp(requestIp.getClientIp(ctx.req))) ?? "United States";
 
   if (process.env.NEXT_PUBLIC_NODE_ENV === "development") {
     host = "localhost:8181";

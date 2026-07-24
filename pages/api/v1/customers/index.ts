@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import type { NextApiRequest, NextApiResponse } from "next";
 import requestIp from "request-ip";
 import { sanitizeFormAnswers } from "../../../../server/customers/form-answers";
+import { countryFromIp } from "../../../../server/geo";
 
 const prisma = new PrismaClient();
 
@@ -31,6 +32,8 @@ export default async function handler(
     }
 
     const ip = requestIp.getClientIp(req) ?? undefined;
+    // Best-effort: undefined on any lookup failure, never blocks the submit.
+    const country = await countryFromIp(ip);
 
     const customer = await prisma.customer.create({
       data: {
@@ -38,6 +41,7 @@ export default async function handler(
         name: body.name,
         landingPageId: body.landingPageId,
         ip,
+        country,
         formAnswers,
       },
     });
