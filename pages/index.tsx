@@ -11,10 +11,12 @@ import { GetServerSideProps } from "next";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { event, GoogleAnalytics } from "nextjs-google-analytics";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import requestIp from "request-ip";
 import Swal from "sweetalert2";
 import { Language } from "../interfaces";
+import { initLanderTracking, LanderTracker } from "@/services/tracking";
+import { isMainTarget } from "@/services/main-target";
 
 function Index({
   landingPage,
@@ -22,12 +24,14 @@ function Index({
   country,
   updatedHTML,
   finalLanguage,
+  trackSessionId,
 }: {
   landingPage: ResponseGetLandingPageService;
   errorMessage?: string;
   country: string;
   updatedHTML: string;
   finalLanguage: Language;
+  trackSessionId: string | null;
 }) {
   const router = useRouter();
   const mainLink = landingPage?.mainButton;
@@ -36,7 +40,7 @@ function Index({
     const submitButtons = document.querySelectorAll('button[type="submit"]');
 
     const emailInput: HTMLInputElement = document.querySelector(
-      'input[type="email"][name="email"]'
+      'input[type="email"][name="email"]',
     );
 
     const buttons = document.querySelectorAll("button");
@@ -46,8 +50,8 @@ function Index({
         // runtime — keep the legacy analytics/preventDefault hook off it.
         !button.classList.contains("oxy-form-submit-cta") &&
         Array.from(button.classList).some((className) =>
-          className.includes("form")
-        )
+          className.includes("form"),
+        ),
     );
     if (multipleFormButtons.length > 0) {
       multipleFormButtons.forEach((button) => {
@@ -58,6 +62,26 @@ function Index({
             category: "multiple-form-step",
             label: text,
           });
+          const formSteps = document.getElementsByClassName("form_step");
+          const ownStep = button.closest(".form_step");
+          trackerRef.current?.trackStep(ownStep?.id || classId[0], text);
+          // Runtime redirects to the offer on the last form_step's button — the conversion.
+          if (
+            formSteps.length > 0 &&
+            ownStep === formSteps[formSteps.length - 1]
+          ) {
+            let url: string | undefined;
+            try {
+              url = (
+                JSON.parse(button.getAttribute("value") ?? "{}") as {
+                  url?: string;
+                }
+              ).url;
+            } catch {
+              /* value attr is runtime-owned; absence is fine */
+            }
+            trackerRef.current?.trackClick(url || mainLink);
+          }
           e.preventDefault();
         });
       });
@@ -75,6 +99,11 @@ function Index({
           category: "button-click",
           label: href,
         });
+        if (isMainTarget(href, mainLink)) {
+          trackerRef.current?.trackClick(href);
+        } else {
+          trackerRef.current?.trackLink(href);
+        }
         router.push(href);
         e.preventDefault();
       });
@@ -119,6 +148,56 @@ function Index({
     preventDefaultForSubmitButtons();
   }, []);
 
+  const trackerRef = useRef<LanderTracker | null>(null);
+  useEffect(() => {
+    if (!trackSessionId || !landingPage?.id) return;
+    const tracker = initLanderTracking({ sessionId: trackSessionId });
+    trackerRef.current = tracker;
+    return () => {
+      tracker.destroy();
+      trackerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Quiz runtime contract — see clients/dashboard/public/unlayer-custom/
+    // script-quiz.ts. "oxy-quiz:complete" is cancelable: preventDefault()
+    // claims it, otherwise the runtime falls back to its own redirect.
+    const onQuizStep = (e: Event) => {
+      const d = (e as CustomEvent).detail as
+        | { stepId?: string; value?: string; label?: string }
+        | undefined;
+      event(d?.stepId ?? "quiz_step", {
+        category: "quiz-step",
+        label: d?.label ?? d?.value ?? "",
+      });
+      trackerRef.current?.trackStep(
+        d?.stepId ?? "quiz_step",
+        d?.label ?? d?.value ?? null,
+      );
+    };
+    const onQuizComplete = (e: Event) => {
+      e.preventDefault();
+      const d = (e as CustomEvent).detail as
+        | {
+            answers?: Record<string, string>;
+            email?: string;
+            redirectUrl?: string;
+            appendAnswers?: boolean;
+          }
+        | undefined;
+      void handleQuizComplete(d ?? {});
+    };
+    document.addEventListener("oxy-quiz:step", onQuizStep);
+    document.addEventListener("oxy-quiz:complete", onQuizComplete);
+    return () => {
+      document.removeEventListener("oxy-quiz:step", onQuizStep);
+      document.removeEventListener("oxy-quiz:complete", onQuizComplete);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.documentElement.lang = finalLanguage;
@@ -135,6 +214,7 @@ function Index({
         category: "button-click",
         label: mainLink,
       });
+      trackerRef.current?.trackClick(mainLink);
       Swal.fire({
         title: "Thanks For Joining us",
         html: "Loading....",
@@ -183,9 +263,78 @@ function Index({
         }
       }
     } catch (err) {
-      window.open(mainLink), "_self";
+      (window.open(mainLink), "_self");
     }
   };
+  const appendQuizParams = (
+    url: string,
+    answers?: Record<string, string>,
+    email?: string,
+    appendAnswers = true,
+  ) => {
+    try {
+      const u = new URL(url);
+      if (appendAnswers) {
+        Object.entries(answers ?? {}).forEach(([key, value]) =>
+          u.searchParams.set(key, value),
+        );
+      }
+      if (email) u.searchParams.set("sub3", btoa(email));
+      return u.toString();
+    } catch {
+      return url;
+    }
+  };
+
+  const handleQuizComplete = async ({
+    answers,
+    email,
+    redirectUrl,
+    appendAnswers,
+  }: {
+    answers?: Record<string, string>;
+    email?: string;
+    redirectUrl?: string;
+    appendAnswers?: boolean;
+  }) => {
+    const base = redirectUrl && redirectUrl !== "" ? redirectUrl : mainLink;
+    try {
+      event("click", { category: "quiz-complete", label: base });
+      trackerRef.current?.trackClick(base);
+      Swal.fire({
+        title: "Finding your matches",
+        html: "Loading....",
+        allowEscapeKey: false,
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        },
+      });
+      if (email) {
+        await CreateEmailService({
+          email,
+          landingPageId: landingPage?.id,
+        }).catch(() => undefined);
+      }
+      if (landingPage.directLink) {
+        const direct = await DirectLinkService({
+          email,
+          url: landingPage.directLink,
+        }).catch(() => null);
+        if (direct?.status === "success") {
+          router.push(direct.location);
+          return;
+        }
+      }
+      window.open(
+        appendQuizParams(base, answers, email, appendAnswers !== false),
+        "_self",
+      );
+    } catch (err) {
+      window.open(base, "_self");
+    }
+  };
+
   if (errorMessage) {
     return (
       <div className="w-screen h-screen bg-black font-Anuphan">
@@ -237,7 +386,8 @@ function Index({
     );
   }
 
-  const primaryLang = (landingPage.primaryLanguage ?? landingPage.language) as Language;
+  const primaryLang = (landingPage.primaryLanguage ??
+    landingPage.language) as Language;
   const t =
     landingPage.translations?.[finalLanguage] ??
     landingPage.translations?.[primaryLang];
@@ -322,30 +472,58 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
     });
 
     const { pickLanguage } = await import("../server/render/pick-language");
-    const supported = (landingPage.supportedLanguages?.length
-      ? landingPage.supportedLanguages
-      : [landingPage.language]) as Language[];
-    const primary = (landingPage.primaryLanguage ?? landingPage.language) as Language;
+    const supported = (
+      landingPage.supportedLanguages?.length
+        ? landingPage.supportedLanguages
+        : [landingPage.language]
+    ) as Language[];
+    const primary = (landingPage.primaryLanguage ??
+      landingPage.language) as Language;
     const finalLanguage = pickLanguage(acceptLanguage, supported, primary);
+
+    const { resolveVisitor, buildVisitorCookie, VISITOR_COOKIE } =
+      await import("../server/analytics/visitor-cookie");
+    const visitor = resolveVisitor(ctx.req.cookies?.[VISITOR_COOKIE]);
+    if (!visitor.isReturning) {
+      try {
+        ctx.res.setHeader(
+          "Set-Cookie",
+          buildVisitorCookie(
+            visitor.visitorId,
+            process.env.NEXT_PUBLIC_NODE_ENV !== "development",
+          ),
+        );
+      } catch {
+        /* cookie failure must not break the lander */
+      }
+    }
+
+    const { recordLanderView } =
+      await import("../server/analytics/record-view");
+    const trackSessionId =
+      landingPage?.id && country !== "Thailand"
+        ? await recordLanderView({
+            prisma,
+            landingPageId: landingPage.id,
+            domainId: landingPage.domain?.id ?? null,
+            country,
+            userAgent: ctx.req.headers["user-agent"],
+            referrer: ctx.req.headers.referer,
+            query: ctx.query,
+            visitorId: visitor.visitorId,
+            isReturning: visitor.isReturning,
+          })
+        : null;
 
     const dom = new JSDOM(landingPage.html);
 
-    // existing multiple-form script stripping (UNCHANGED)
-    const scriptProductionMultipleForm = dom.window.document.querySelector(
-      'script.script_multiple_form[src="https://oxyclick.com/unlayer-custom/script-multiple-form.js"]'
-    );
-    if (scriptProductionMultipleForm && host.includes("localhost")) {
-      scriptProductionMultipleForm.remove();
-    }
-    const scriptDevMultipleForm = dom.window.document.querySelector(
-      'script.script_multiple_form[src="http://localhost:8080/unlayer-custom/script-multiple-form.js"]'
-    );
-    if (scriptDevMultipleForm && !host.includes("localhost")) {
-      scriptDevMultipleForm.remove();
-    }
+    const { stripParityScripts } =
+      await import("../server/render/strip-parity-scripts");
+    stripParityScripts(dom.window.document, host);
 
     // NEW: i18n substitution
-    const { applyI18nSubstitution } = await import("../server/render/substitute-i18n");
+    const { applyI18nSubstitution } =
+      await import("../server/render/substitute-i18n");
     applyI18nSubstitution(
       dom.window.document,
       landingPage.translations ?? null,
@@ -353,9 +531,8 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       primary,
     );
 
-    const { stampMultipleFormMeta } = await import(
-      "../server/render/stamp-multiple-form"
-    );
+    const { stampMultipleFormMeta } =
+      await import("../server/render/stamp-multiple-form");
     stampMultipleFormMeta(dom.window.document, {
       landingPageId: landingPage.id,
       fallbackLink: landingPage.mainButton ?? "",
@@ -370,6 +547,7 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
         landingPage: landingPage ?? null,
         country,
         finalLanguage,
+        trackSessionId: trackSessionId ?? null,
       },
     };
   } catch (error) {
