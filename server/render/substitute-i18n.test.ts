@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { applyI18nSubstitution } from './substitute-i18n';

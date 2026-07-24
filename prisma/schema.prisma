@@ -414,6 +414,8 @@ model Customer {
   company      String?
   website      String?
   zip_code     String?
+  ip          String?
+  formAnswers Json?
 
   landingPageId String      @db.ObjectId
   landingPages  LandingPage @relation(fields: [landingPageId], references: [id], onDelete: Cascade)

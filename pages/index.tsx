@@ -40,10 +40,14 @@ function Index({
     );
 
     const buttons = document.querySelectorAll("button");
-    const multipleFormButtons = Array.from(buttons).filter((button) =>
-      Array.from(button.classList).some((className) =>
-        className.includes("form")
-      )
+    const multipleFormButtons = Array.from(buttons).filter(
+      (button) =>
+        // The submission CTA is owned entirely by the multi-step form
+        // runtime — keep the legacy analytics/preventDefault hook off it.
+        !button.classList.contains("oxy-form-submit-cta") &&
+        Array.from(button.classList).some((className) =>
+          className.includes("form")
+        )
     );
     if (multipleFormButtons.length > 0) {
       multipleFormButtons.forEach((button) => {
@@ -348,6 +352,14 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
       finalLanguage,
       primary,
     );
+
+    const { stampMultipleFormMeta } = await import(
+      "../server/render/stamp-multiple-form"
+    );
+    stampMultipleFormMeta(dom.window.document, {
+      landingPageId: landingPage.id,
+      fallbackLink: landingPage.mainButton ?? "",
+    });
 
     // Serialize ONCE at the end
     const updatedHTML: string = dom.serialize();
