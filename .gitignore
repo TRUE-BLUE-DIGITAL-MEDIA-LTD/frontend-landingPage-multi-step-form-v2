@@ -36,3 +36,13 @@ yarn-error.log*
 next-env.d.ts
 
 /generated/prisma
+
+# AI agent artifacts (Claude Code / claude-flow) — never commit
+.claude/
+.claude-flow/
+.swarm/
+.hive-mind/
+.agents/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
