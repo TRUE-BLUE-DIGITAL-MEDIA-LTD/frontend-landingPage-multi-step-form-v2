@@ -38,7 +38,6 @@ export default async function handler(
     const customer = await prisma.customer.create({
       data: {
         email: body.email,
-        name: body.name,
         landingPageId: body.landingPageId,
         ip,
         country,

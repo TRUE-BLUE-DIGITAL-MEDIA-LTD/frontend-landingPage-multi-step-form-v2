@@ -406,13 +406,7 @@ model Customer {
   createAt DateTime @default(now())
   updateAt DateTime @updatedAt
 
-  name         String?
-  email        String?
-  phone_number String?
-  birthday     String?
-  company      String?
-  website      String?
-  zip_code     String?
+  email       String?
   ip          String?
   country     String?
   formAnswers Json?
