@@ -17,6 +17,7 @@ import Swal from "sweetalert2";
 import { Language } from "../interfaces";
 import { initLanderTracking, LanderTracker } from "@/services/tracking";
 import { isMainTarget } from "@/services/main-target";
+import { isNewTabAnchor } from "@/services/new-tab";
 import { countryFromIp } from "../server/geo";
 
 function Index({
@@ -104,6 +105,12 @@ function Index({
           trackerRef.current?.trackClick(href);
         } else {
           trackerRef.current?.trackLink(href);
+        }
+        // New-tab links (e.g. the consent row's privacy-policy link) keep
+        // native navigation — hijacking them into router.push() would
+        // replace the lander and destroy multi-step form progress.
+        if (isNewTabAnchor(button.target)) {
+          return;
         }
         router.push(href);
         e.preventDefault();
